@@ -64,6 +64,7 @@ namespace task4Lib
         }
     }
     #endregion
+
     #region 一些常量和扩展方法
     /// <summary>
     /// 一些常量和扩展方法
@@ -159,6 +160,7 @@ namespace task4Lib
         }
     }
     #endregion
+
     #region 一些委托
     public delegate void BlockFinishedEventHandler(object sender, BlockFinishedEventArgs e);
     public delegate void CommandReceivedEventHandler(object sender, CommandReceivedEventArgs e);
@@ -167,6 +169,7 @@ namespace task4Lib
     public delegate void Delegate_Void_Bool(bool logic);
     public delegate int Delegate_Int_Int(int value);
     #endregion
+
     #region 文件区块类
     public class FileBlockException : Exception
     {
@@ -321,6 +324,7 @@ namespace task4Lib
         }
     }
     #endregion
+
     #region 事件参数类
     public class BlockFinishedEventArgs : EventArgs
     {
@@ -346,6 +350,7 @@ namespace task4Lib
         }
     }
     #endregion
+
     #region 文件区块抽象集合类
     /// <summary>
     /// 文件区块的抽象集合
@@ -543,6 +548,7 @@ namespace task4Lib
         }
     }
     #endregion
+
     #region 文件传输基类
     public abstract class FileTransmission : IDisposable
     {
@@ -1007,6 +1013,7 @@ namespace task4Lib
         }
     }
     #endregion
+
     #region 发送端类
     /// <summary>
     /// 发送端
@@ -1247,6 +1254,7 @@ namespace task4Lib
         }
     }
     #endregion
+
     #region 接收端类
     /// <summary>
     /// 接收端

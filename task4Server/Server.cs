@@ -6,10 +6,12 @@ using System.Threading;
 using System.Windows.Forms;
 using task4Lib;
 using System.Diagnostics;
-using Message = task4Lib.Message;
+
 
 namespace task4Server
 {
+    using Message = task4Lib.Message;
+
     public delegate void MessageDelegate(Message msg);
     public delegate void OnlineOfflineDelegate(Message msg);
     public delegate void FileInfoDelegate(Message msg);
@@ -28,6 +30,7 @@ namespace task4Server
         private ManualResetEvent mreMessage;
         private ManualResetEvent mreFile;
 
+        bool IsServing;
         UserInformation ServerInfo;
         Socket Listener;
         IPAddress ServerIP;
@@ -57,11 +60,10 @@ namespace task4Server
 
             ClientInfoDict = new Dictionary<uint, string>();
             clientSocketsDict = new Dictionary<uint, Socket>();
-
-            IsServe = new AutoResetEvent(false);
+            IsServing = false;
             msgQueue = new Queue<Message>();
             msgFileQueue = new Queue<Message>();
-            MsgProcess = new ServerMessageProcess(ServerInfo, msgQueue, clientSocketsDict, ClientInfoDict, mreMessage);
+            MsgProcess = new ServerMessageProcess();
             MsgProcess.OnlineNotifyReceived += MsgProcess_OnlineNotifyReceived;
             MsgProcess.OfflineNotifyReceived += MsgProcess_OfflineNotifyReceived;
             MsgProcess.MessageReceived += MsgProcess_MessageReceived;
@@ -76,12 +78,44 @@ namespace task4Server
             listViewClient.Columns.Add("ID");
             listViewClient.Columns.Add("IP");
         }
+        private void Server_Load(object sender, EventArgs e)
+        {
+            UpdateControls(false);
+        }
 
         void Server_FormClosed(object sender, FormClosedEventArgs e)
         {
             Process.GetCurrentProcess().Kill();
         }
+        public void UpdateControls(bool OnServe)
+        {
+            textBoxIP.Enabled = !OnServe;
+            textBoxPort.Enabled = !OnServe;
+            textBoxServerName.Enabled = !OnServe;
+            textBoxMessage.Enabled = OnServe;
+            textBoxMessage.Text = "";
+            btnCloseServer.Enabled = OnServe;
+            btnStartServer.Enabled = !OnServe;
 
+            btnSingle.Enabled = OnServe;
+            btnGroup.Enabled = OnServe;
+            btnSendFile.Enabled = OnServe;
+            if (OnServe)
+            {
+                status.Text = "已启动服务";
+            }
+            else
+            {
+                status.Text = "未启动服务";
+            }
+        }
+
+        #region 异常处理
+        /// <summary>
+        /// 处理消息处理线程产生的错误
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         void MsgProcess_MessageProcessErrorOccurred(object sender, MessageProcessErrorArgs e)
         {
             if (InvokeRequired)
@@ -99,6 +133,11 @@ namespace task4Server
             MessageBox.Show(ex.ToString());
         }
 
+        /// <summary>
+        /// 处理产生的Socket异常
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         void MsgProcess_SocketErrorOccurred(object sender, SocketErrorArgs e)
         {
             if (InvokeRequired)
@@ -127,6 +166,7 @@ namespace task4Server
                     ClientInfoDict.Remove(ID);
                 }
             }
+            //需要通知其他客户端这个客户端已经下线
             Message msg = new Message(ID);
             lock (msgQueue)
             {
@@ -134,7 +174,10 @@ namespace task4Server
                 mreMessage.Set();
             }
         }
-
+        /// <summary>
+        /// 主线程产生异常
+        /// </summary>
+        /// <param name="ex"></param>
         public void ExceptionOccurred(Exception ex)
         {
             if (InvokeRequired)
@@ -145,6 +188,7 @@ namespace task4Server
                 //this.Clean();
             }
         }
+        #endregion
 
         #region 文件处理
         void MsgProcess_FileInfoMessageReceived(object sender, MessageEventArgs e)
@@ -243,12 +287,6 @@ namespace task4Server
         }
         #endregion
 
-
-        private void Server_Load(object sender, EventArgs e)
-        {
-            UpdateControls(false);
-        }
-
         private void btnStartServer_Click(object sender, EventArgs e)
         {
             if (!IPAddress.TryParse(textBoxIP.Text, out ServerIP))
@@ -292,40 +330,20 @@ namespace task4Server
                 return;
             }
             UpdateControls(true);
-
-
+            MsgProcess.InitServerMessageProcess(ServerInfo, msgQueue, clientSocketsDict, ClientInfoDict, mreMessage);
             threadServer = new Thread(StartServer);
 
             threadServer.IsBackground = true;
             threadMessageProcess = new Thread(MsgProcess.StartMessageProcess);
             threadMessageProcess.IsBackground = true;
+
+            this.IsServing = true;
             threadServer.Start();
             threadMessageProcess.Start();
         }
 
 
-        public void UpdateControls(bool OnServe)
-        {
-            textBoxIP.Enabled = !OnServe;
-            textBoxPort.Enabled = !OnServe;
-            textBoxServerName.Enabled = !OnServe;
-            textBoxMessage.Enabled = OnServe;
 
-            btnCloseServer.Enabled = OnServe;
-            btnStartServer.Enabled = !OnServe;
-
-            btnSingle.Enabled = OnServe;
-            btnGroup.Enabled = OnServe;
-            btnSendFile.Enabled = OnServe;
-            if (OnServe)
-            {
-                status.Text = "已启动服务";
-            }
-            else
-            {
-                status.Text = "未启动服务";
-            }
-        }
         private void StartServer()
         {
             try
@@ -343,7 +361,7 @@ namespace task4Server
                 ExceptionOccurred(ex);
                 return;
             }
-            while (true)
+            while (IsServing)
             {
                 mreConnect.Reset();
                 try
@@ -379,7 +397,6 @@ namespace task4Server
             }
             catch (Exception ex)
             {
-                ExceptionOccurred(ex);
                 return;
             }
             Interlocked.Increment(ref clientNum);
@@ -424,6 +441,8 @@ namespace task4Server
         }
         private void WaitForData(object state)
         {
+            if (!this.IsServing)
+                return;
             AsyncCallback callback = new AsyncCallback(OnDataReceived);
             SocketPacket sp = (SocketPacket)state;
             try
@@ -443,11 +462,23 @@ namespace task4Server
         }
         public void OnDataReceived(IAsyncResult ar)
         {
+            if (!this.IsServing)
+                return;
             SocketPacket sp = (SocketPacket)ar.AsyncState;
 
             try
             {
                 int size = sp.currentSocket.EndReceive(ar);
+
+                if(size==0)
+                {
+                    lock(msgQueue)
+                    {
+                        msgQueue.Enqueue(new Message(sp.ClientID));
+                        mreMessage.Set();
+                    }
+                    return;
+                }
 
                 byte[] data = new byte[size];
                 Array.Copy(sp.dataBuffer, data, data.Length);
@@ -472,7 +503,7 @@ namespace task4Server
         }
         private void btnCloseServer_Click(object sender, EventArgs e)
         {
-            this.Clean();
+            this.CloseServer();
         }
 
         private void btnSingle_Click(object sender, EventArgs e)
@@ -568,24 +599,34 @@ namespace task4Server
             }
             new Thread(delegate () { new FileSenderForm(fileSocket, openFileDialog.FileName).ShowDialog(); }).Start();
         }
-        public void Clean()
+        public void DisconnectAllClient()
         {
+            foreach(var client in clientSocketsDict)
+            {
+                client.Value.Shutdown(SocketShutdown.Both);
+                client.Value.Close();
+            }
+            clientSocketsDict = new Dictionary<uint, Socket>();
+            ClientInfoDict = new Dictionary<uint, string>();
+            clientNum = -1;
+        }
+        public void CloseServer()
+        {
+            this.IsServing = false;
+            this.mreConnect.Set();
+
             listViewClient.Items.Clear();
-            if (threadMessageProcess != null)
-                threadMessageProcess.Abort();
-            if (threadServer != null)
-                threadServer.Abort();
+            listViewChat.Items.Clear();
+            DisconnectAllClient();
             if (Listener != null)
             {
                 if (Listener.Connected)
                 {
                     Listener.Shutdown(SocketShutdown.Both);
-
                 }
                 Listener.Close();
                 Listener = Listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             }
-
             UpdateControls(false);
         }
     }

@@ -169,6 +169,10 @@ namespace task4Lib
         {
             Message msg = new Message();
             msg.MessageType = MessageType.File;
+            msg.SenderID = sender.ID;
+            msg.SenderName = sender.Name;
+            msg.SenderIP = sender.IP;
+            msg.SenderPort = sender.Port;
             msg.ReceiverID = receiverID;
             msg.Text = fileName;
             return GetBytes(msg);
@@ -238,7 +242,7 @@ namespace task4Lib
         public Queue<Message> MessageQueue;
         public Dictionary<uint, string> Friends;
         public UserInformation HostInfo;
-        public MessageProcess(UserInformation HostInfo, Dictionary<uint, string> friends, ManualResetEvent mreMsg, Queue<Message> msgQueue)
+        protected void InitMessageProcess(UserInformation HostInfo, Dictionary<uint, string> friends, ManualResetEvent mreMsg, Queue<Message> msgQueue)
         {
             this.Friends = friends;
             this.mreMessage = mreMsg;
@@ -352,13 +356,13 @@ namespace task4Lib
 
         Dictionary<uint, Socket> ClientSocketDict;
 
-        public ServerMessageProcess(UserInformation server,
+        public void InitServerMessageProcess(UserInformation server,
             Queue<Message> msgQueue,
             Dictionary<uint, Socket> clients,
             Dictionary<uint, string> friends,
-            ManualResetEvent mreMsg) :
-            base(server, friends, mreMsg, msgQueue)
+            ManualResetEvent mreMsg)
         {
+            base.InitMessageProcess(server, friends, mreMsg, msgQueue);
             this.ClientSocketDict = clients;
         }
         protected override void FileInfoGet(Message msg)
@@ -575,9 +579,9 @@ namespace task4Lib
     public class ClientMessageProcess : MessageProcess
     {
         public TcpClient client;
-        public ClientMessageProcess(UserInformation selfInfo, Queue<Message> msgQueue, Dictionary<uint, string> friends, ManualResetEvent mreMsg) :
-            base(selfInfo, friends, mreMsg, msgQueue)
+        public void InitClientMessageProcess(UserInformation selfInfo, Queue<Message> msgQueue, Dictionary<uint, string> friends, ManualResetEvent mreMsg)
         {
+            base.InitMessageProcess(selfInfo, friends, mreMsg, msgQueue);
         }
     }
     #endregion

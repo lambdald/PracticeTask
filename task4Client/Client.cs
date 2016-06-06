@@ -29,8 +29,10 @@ namespace task4Client
 
     public partial class Client : Form
     {
+
         Socket client;
- 
+        bool IsConnected;
+
         ManualResetEvent mreMessage;
 
         UserInformation SelfInfo;
@@ -47,15 +49,16 @@ namespace task4Client
         {
             InitializeComponent();
             this.FormClosed += Client_FormClosed;
+            this.FormClosing+=Client_FormClosing;
             textBoxIP.Text = IPAddress.Loopback.ToString();
             msgQueue = new Queue<Message>();
             mreMessage = new ManualResetEvent(false);
 
             friends = new Dictionary<uint, string>();
-
+            IsConnected = false;
             SelfInfo = new UserInformation();
             ServerInfo = new UserInformation(UserInformation.ServerID);
-            MsgProcess = new ClientMessageProcess(SelfInfo, msgQueue, friends, mreMessage);
+            MsgProcess = new ClientMessageProcess();
 
             MsgProcess.OnlineNotifyReceived += MsgProcess_OnlineNotifyReceived;
             MsgProcess.OfflineNotifyReceived += MsgProcess_OfflineNotifyReceived;
@@ -69,6 +72,11 @@ namespace task4Client
              listViewOnline.Columns.Add("ID", listViewOnline.Width / 3);
             listViewOnline.Columns.Add("用户", listViewOnline.Width * 2 / 3);
            
+        }
+
+        private void Client_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            this.Clean();
         }
 
         void Client_FormClosed(object sender, FormClosedEventArgs e)
@@ -215,7 +223,7 @@ namespace task4Client
             }
             foreach (ListViewItem item in listViewOnline.Items)
             {
-                if (item.SubItems[1].Text == strID)
+                if (item.SubItems[0].Text == strID)
                 {
                     listViewOnline.Items.Remove(item);
                     return;
@@ -228,7 +236,7 @@ namespace task4Client
         public void ExceptionOccurred(Exception ex)
         {
             if (InvokeRequired)
-                this.Invoke(new ExceptionDelegate(ExceptionOccurred), ex);
+                this.BeginInvoke(new ExceptionDelegate(ExceptionOccurred), ex);
             else
             {
                 MessageBox.Show(ex.ToString());
@@ -276,6 +284,7 @@ namespace task4Client
                 MessageBox.Show(ex.ToString(), "错误");
                 return;
             }
+            MsgProcess.InitClientMessageProcess(SelfInfo, msgQueue, friends, mreMessage);
             connection = new Thread(ConnectServer);
             connection.IsBackground = true;
             connection.Start();
@@ -296,14 +305,7 @@ namespace task4Client
             }
             catch (Exception e)
             {
-                if (InvokeRequired)
-                {
-                    this.BeginInvoke(new ExceptionDelegate(ConnectFailed), e);
-                }
-                else
-                {
-                    this.ConnectFailed(e);
-                }
+
             }
 
         }
@@ -336,7 +338,15 @@ namespace task4Client
             }
             catch (Exception e)
             {
-                ExceptionOccurred(e);
+                if (InvokeRequired)
+                {
+                    this.BeginInvoke(new ExceptionDelegate(ConnectFailed), e);
+                }
+                else
+                {
+                    this.ConnectFailed(e);
+                }
+                this.BeginInvoke(new SimpleDelegate(this.Clean));
                 return;
             }
             msg = new Message();
@@ -352,28 +362,56 @@ namespace task4Client
             }
             this.SelfInfo.ID = msg.ReceiverID;
             this.ServerInfo.Name = msg.SenderName;
+            IsConnected = true;
 
-            while (true)
-            {
-                data = new byte[MessageConvert.MaxMessageSize];
+            WaitForData();
+
+        }
+
+        private void WaitForData()
+        {
+            if (!IsConnected)
+                return;
+            SocketPacket sp = new SocketPacket(client,SelfInfo.ID);
+                byte[] data = new byte[MessageConvert.MaxMessageSize];
                 try
                 {
-                    client.Receive(data, 0, data.Length, SocketFlags.None);
-                    msg = new Message();
-                    msg = MessageConvert.RestoreBytes(data);
+                    client.BeginReceive(sp.dataBuffer,0, sp.dataBuffer.Length,SocketFlags.None,new AsyncCallback(ReceiveData),sp);
                 }
                 catch (Exception ex)
                 {
                     ExceptionOccurred(ex);
                     return;
                 }
-
+        }
+        private void ReceiveData(IAsyncResult ar)
+        {
+            if (!IsConnected)
+                return;
+            SocketPacket sp = (SocketPacket)ar.AsyncState;
+            try
+            {
+                int size = sp.currentSocket.EndReceive(ar);
+                if (size == 0)
+                {
+                    this.BeginInvoke(new SimpleDelegate(this.Clean));
+                    return;
+                }
+                byte[] data = new byte[size];
+                Array.Copy(sp.dataBuffer, data, data.Length);
+                Message msg = MessageConvert.RestoreBytes(data);
                 lock (msgQueue)
                 {
                     msgQueue.Enqueue(msg);
                     mreMessage.Set();
                 }
             }
+            catch (Exception ex)
+            {
+                ExceptionOccurred(ex);
+                return;
+            }
+            WaitForData();
         }
         public void UpdateControls(bool OnConnect)
         {
@@ -381,13 +419,14 @@ namespace task4Client
             textBoxPort.Enabled = !OnConnect;
             textBoxClientName.Enabled = !OnConnect;
             textBoxMessage.Enabled = OnConnect;
-
+            textBoxMessage.Text = "";
             btnConnectServer.Enabled = !OnConnect;
             btnCloseConnection.Enabled = OnConnect;
 
             btnSend.Enabled = OnConnect;
             btnClear.Enabled = OnConnect;
             btnSendFile.Enabled = OnConnect;
+            
             if (OnConnect)
             {
                 status.Text = "已连接至服务器";
@@ -438,12 +477,7 @@ namespace task4Client
         }
         private void btnCloseConnection_Click(object sender, EventArgs e)
         {
-            listViewOnline.Clear();
-            client.Shutdown(SocketShutdown.Both);
-            client.Close();
-            connection.Abort();
-            threadMessageProcess.Abort();
-            UpdateControls(false);
+            this.Clean();
         }
 
         private void btnSendFile_Click(object sender, EventArgs e)
@@ -508,13 +542,18 @@ namespace task4Client
 
         public void Clean()
         {
+            IsConnected = false;
+            UpdateControls(false);
             if (client != null)
+            {
+                if(client.Connected)
+                    client.Shutdown(SocketShutdown.Both);
+                //client.Blocking = false;
                 client.Close();
-            if (connection != null)
-                connection.Abort();
+            }
             if (threadMessageProcess != null)
                 threadMessageProcess.Abort();
-            UpdateControls(false);
+            this.listViewChat.Items.Clear();
         }
     }
 }
