@@ -8,13 +8,13 @@ namespace task4Lib
 {
     public class UserInformation
     {
-        public const int GroupID = -1;
-        public const int ServerID = int.MaxValue;
+        public const uint GroupID = int.MaxValue-1;
+        public const uint ServerID = int.MaxValue;
         public string Name; //发送者名字
-        public int ID;  //发送者ID
+        public uint ID;  //发送者ID
         public string IP; //发送者IP
         public int Port;
-        public UserInformation(string name,int id,string ip,int port)
+        public UserInformation(string name,uint id,string ip,int port)
         {
             this.Name = name;
             this.ID = id;
@@ -25,7 +25,7 @@ namespace task4Lib
         /// 群发
         /// </summary>
         /// <param name="name"></param>
-        public UserInformation(int id)
+        public UserInformation(uint id)
         {
             this.ID = id;
             this.IP = "";
@@ -34,27 +34,6 @@ namespace task4Lib
         public UserInformation()
         {
 
-        }
-    }
-    public class FileInformation
-    {
-        public string FileName;
-        public long FileSize;
-        public long BlockCount;
-        public FileInformation(string filename, long filesize, long blockcount)
-        {
-            this.FileName = filename;
-            this.FileSize = filesize;
-            this.BlockCount = blockcount;
-        }
-        public FileInformation(string filename)
-        {
-            this.FileName = filename;
-        }
-
-        public FileInformation()
-        {
-            // TODO: Complete member initialization
         }
     }
 }

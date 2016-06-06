@@ -1,17 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Xml;
 using task4Lib;
 using System.Diagnostics;
 using Message = task4Lib.Message;
@@ -23,7 +15,7 @@ namespace task4Server
     public delegate void FileInfoDelegate(Message msg);
     public delegate void ProgressDelegate(FileTransmission task);
     public delegate void ExceptionDelegate(Exception ex);
-    public delegate void SocketErrorDelegate(int id);
+    public delegate void SocketErrorDelegate(uint id);
     public delegate void StatusDelegate(string str);
     public delegate void SimpleDelegate();
 
@@ -42,10 +34,10 @@ namespace task4Server
         IPEndPoint hostEndPoint;
         Thread threadServer;
         Thread threadMessageProcess;
-        int clientNum = -1;
+        int clientNum;
 
-        Dictionary<int, UserInformation> ClientInfoDict;
-        Dictionary<int, Socket> clientSocketsDict;
+        Dictionary<uint, string> ClientInfoDict;
+        Dictionary<uint, Socket> clientSocketsDict;
 
         ServerMessageProcess MsgProcess;
         Queue<Message> msgQueue;
@@ -63,10 +55,10 @@ namespace task4Server
             Listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             clientNum = -1;
 
-            ClientInfoDict = new Dictionary<int, UserInformation>();
-            clientSocketsDict = new Dictionary<int, Socket>();
+            ClientInfoDict = new Dictionary<uint, string>();
+            clientSocketsDict = new Dictionary<uint, Socket>();
 
-
+            IsServe = new AutoResetEvent(false);
             msgQueue = new Queue<Message>();
             msgFileQueue = new Queue<Message>();
             MsgProcess = new ServerMessageProcess(ServerInfo, msgQueue, clientSocketsDict, ClientInfoDict, mreMessage);
@@ -118,7 +110,7 @@ namespace task4Server
                 this.SocketErrorOccurred(e.ID);
             }
         }
-        void SocketErrorOccurred(int ID)
+        void SocketErrorOccurred(uint ID)
         {
             if (clientSocketsDict.ContainsKey(ID))
             {
@@ -127,17 +119,15 @@ namespace task4Server
                     clientSocketsDict.Remove(ID);
                 }
             }
-            Message msg = null;
+
             if (ClientInfoDict.ContainsKey(ID))
             {
-                msg = new Message(Message.MessageType.Offline, ClientInfoDict[ID]);
                 lock (ClientInfoDict)
                 {
                     ClientInfoDict.Remove(ID);
                 }
             }
-            else
-                msg = new Message(Message.MessageType.Offline, new UserInformation(ID));
+            Message msg = new Message(ID);
             lock (msgQueue)
             {
                 msgQueue.Enqueue(msg);
@@ -169,7 +159,7 @@ namespace task4Server
         }
         private void OnFileInfoReceived(Message msg)
         {
-            new Thread(delegate() { new FileReceiverForm(msg).ShowDialog(); }).Start();
+            new Thread(delegate () { new FileReceiverForm(msg).ShowDialog(); }).Start();
         }
         #endregion
 
@@ -187,9 +177,22 @@ namespace task4Server
         void OnMessageReceived(Message msg)
         {
             ListViewItem item = new ListViewItem();
-            item.Text = msg.Sender.Name;
-            item.SubItems.Add(msg.Content.ToString());
-            item.SubItems.Add(msg.Receiver.Name);
+            if (ClientInfoDict.ContainsKey(msg.SenderID))
+                item.Text = ClientInfoDict[msg.SenderID];
+            item.SubItems.Add(msg.Text);
+            if (msg.ReceiverID == UserInformation.ServerID)
+            {
+                item.SubItems.Add("我");
+            }
+            else if (msg.ReceiverID == UserInformation.GroupID)
+            {
+                item.SubItems.Add("群发");
+            }
+            else
+            {
+                if (ClientInfoDict.ContainsKey(msg.ReceiverID))
+                    item.SubItems.Add(ClientInfoDict[msg.ReceiverID]);
+            }
             listViewChat.Items.Add(item);
         }
         #endregion
@@ -208,9 +211,9 @@ namespace task4Server
         private void OnOnlineNotifyReceived(Message msg)
         {
             ListViewItem item = new ListViewItem();
-            item.Text = msg.Friend.Name;
-            item.SubItems.Add(msg.Friend.ID.ToString());
-            item.SubItems.Add(((IPEndPoint)clientSocketsDict[msg.Friend.ID].RemoteEndPoint).ToString());
+            item.Text = msg.SenderName;
+            item.SubItems.Add(msg.SenderID.ToString());
+            item.SubItems.Add(((IPEndPoint)clientSocketsDict[msg.SenderID].RemoteEndPoint).ToString());
             listViewClient.Items.Add(item);
         }
         #endregion
@@ -228,7 +231,7 @@ namespace task4Server
         }
         private void OnOfflineNotifyReceived(Message msg)
         {
-            string strID = msg.Friend.ID.ToString();
+            string strID = msg.OfflineID.ToString();
             foreach (ListViewItem item in listViewClient.Items)
             {
                 if (item.SubItems[1].Text == strID)
@@ -240,11 +243,6 @@ namespace task4Server
         }
         #endregion
 
-
-        private void textBoxServerName_TextChanged(object sender, EventArgs e)
-        {
-            ServerInfo.Name = textBoxServerName.Text;
-        }
 
         private void Server_Load(object sender, EventArgs e)
         {
@@ -296,9 +294,8 @@ namespace task4Server
             UpdateControls(true);
 
 
-
             threadServer = new Thread(StartServer);
-            
+
             threadServer.IsBackground = true;
             threadMessageProcess = new Thread(MsgProcess.StartMessageProcess);
             threadMessageProcess.IsBackground = true;
@@ -337,8 +334,8 @@ namespace task4Server
                 {
                     Listener.Bind(hostEndPoint);
                 }
-                Listener.SendBufferSize = Message.MaxMessageSize;
-                Listener.ReceiveBufferSize = Message.MaxMessageSize;
+                Listener.SendBufferSize = MessageConvert.MaxMessageSize;
+                Listener.ReceiveBufferSize = MessageConvert.MaxMessageSize;
                 Listener.Listen(100);
             }
             catch (Exception ex)
@@ -351,7 +348,7 @@ namespace task4Server
                 mreConnect.Reset();
                 try
                 {
-                    Listener.BeginAccept(Message.MaxMessageSize, new AsyncCallback(OnClientConnect), Listener);
+                    Listener.BeginAccept(MessageConvert.MaxMessageSize, new AsyncCallback(OnClientConnect), Listener);
                 }
                 catch (SocketException ex)
                 {
@@ -387,30 +384,43 @@ namespace task4Server
             }
             Interlocked.Increment(ref clientNum);
 
-            Message msg = new Message();
-            msg.ParseXmlString(buffer);
-            msg.Sender.ID = clientNum;
-            Message clientInfo = new Message(this.ServerInfo, msg.Sender, "你的id是 " + clientNum.ToString());
-            Message newClient = new Message(new UserInformation(UserInformation.GroupID), Message.MessageType.Online, msg.Sender);
-            Message allClientInfo = new Message(msg.Sender, Message.MessageType.Online, ClientInfoDict);
+            Message msg = MessageConvert.RestoreBytes(buffer);
+            msg.SenderID = (uint)clientNum;
+            Message clientinfo = new Message(UserInformation.ServerID, msg.SenderID, "你的id是 " + msg.SenderID.ToString());
+            clientinfo.SenderName = ServerInfo.Name;
+            Message allClientInfo = new Message(msg.SenderID, ClientInfoDict);
+            try
+            {
+                socketHandler.Send(MessageConvert.GetBytes(clientinfo));
+                socketHandler.Send(MessageConvert.GetAllOnlineNotifyBytes(ClientInfoDict));
+            }
+            catch (SocketException)
+            {
+                this.SocketErrorOccurred(msg.SenderID);
+                return;
+            }
+            catch (Exception ex)
+            {
+                this.ExceptionOccurred(ex);
+                return;
+            }
+            msg.ReceiverID = UserInformation.GroupID;
 
             lock (clientSocketsDict)
             {
-                clientSocketsDict.Add(clientNum, socketHandler);
+                clientSocketsDict.Add(msg.SenderID, socketHandler);
             }
             lock (ClientInfoDict)
             {
-                ClientInfoDict.Add(clientNum, msg.Sender);
+                ClientInfoDict.Add(msg.SenderID, msg.SenderName);
             }
             lock (msgQueue)
             {
-                msgQueue.Enqueue(msg);
-                msgQueue.Enqueue(clientInfo);
-                msgQueue.Enqueue(newClient);
                 msgQueue.Enqueue(allClientInfo);
+                msgQueue.Enqueue(msg);
                 mreMessage.Set();
             }
-            ThreadPool.QueueUserWorkItem(new WaitCallback(WaitForData), new SocketPacket(socketHandler, msg.Sender));
+            ThreadPool.QueueUserWorkItem(new WaitCallback(WaitForData), new SocketPacket(socketHandler, msg.SenderID));
         }
         private void WaitForData(object state)
         {
@@ -422,7 +432,7 @@ namespace task4Server
             }
             catch (SocketException)
             {
-                SocketErrorOccurred(sp.clientNumber);
+                SocketErrorOccurred(sp.ClientID);
                 return;
             }
             catch (Exception ex)
@@ -438,10 +448,10 @@ namespace task4Server
             try
             {
                 int size = sp.currentSocket.EndReceive(ar);
-                Message msg = new Message();
+
                 byte[] data = new byte[size];
                 Array.Copy(sp.dataBuffer, data, data.Length);
-                msg.ParseXmlString(data);
+                Message msg = MessageConvert.RestoreBytes(data);
                 lock (msgQueue)
                 {
                     msgQueue.Enqueue(msg);
@@ -451,7 +461,7 @@ namespace task4Server
             }
             catch (SocketException)
             {
-                SocketErrorOccurred(sp.clientNumber);
+                SocketErrorOccurred(sp.ClientID);
                 return;
             }
             catch (Exception ex)
@@ -476,15 +486,15 @@ namespace task4Server
                     return;
                 }
                 string content;
-                int id;
-                Int32.TryParse(listViewClient.FocusedItem.SubItems[1].Text, out id);
+                uint id;
+                UInt32.TryParse(listViewClient.FocusedItem.SubItems[1].Text, out id);
                 content = textBoxMessage.Text;
                 if (content == string.Empty)
                 {
                     MessageBox.Show("请输入消息内容", "提示");
                     return;
                 }
-                Message msg = new Message(this.ServerInfo, ClientInfoDict[id], content);
+                Message msg = new Message(UserInformation.ServerID, id, content);
                 lock (msgQueue)
                 {
                     msgQueue.Enqueue(msg);
@@ -504,7 +514,7 @@ namespace task4Server
                     return;
                 }
                 Message msg;
-                msg = new Message(this.ServerInfo, new UserInformation(UserInformation.GroupID), content);
+                msg = new Message(UserInformation.ServerID, UserInformation.GroupID, content);
                 lock (msgQueue)
                 {
                     msgQueue.Enqueue(msg);
@@ -550,13 +560,13 @@ namespace task4Server
             sender.ID = ServerInfo.ID;
             sender.IP = ((IPEndPoint)fileSocket.LocalEndPoint).Address.ToString();
             sender.Port = ((IPEndPoint)fileSocket.LocalEndPoint).Port;
-            Message msg = new Message(sender, ClientInfoDict[(int)id], new FileInformation(openFileDialog.FileName));
+            Message msg = new Message(sender, (uint)id, openFileDialog.FileName);
             lock (msgQueue)
             {
                 msgQueue.Enqueue(msg);
                 mreMessage.Set();
             }
-            new Thread(delegate() { new FileSenderForm(fileSocket, openFileDialog.FileName).ShowDialog(); }).Start();
+            new Thread(delegate () { new FileSenderForm(fileSocket, openFileDialog.FileName).ShowDialog(); }).Start();
         }
         public void Clean()
         {

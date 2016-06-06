@@ -17,21 +17,22 @@ using System.Diagnostics;
 using Message = task4Lib.Message;
 namespace task4Client
 {
+    public delegate void SimpleDelegate();
+
     public delegate void UpdateControlsDelegate(bool OnConnect);
     public delegate void MessageDelegate(Message msg);
     public delegate void OnlineOfflineDelegate(Message msg);
     public delegate void FileInfoDelegate(Message msg);
     public delegate void StatusDelegate(string str);
-    public delegate void SimpleDelegate();
     public delegate void ExceptionDelegate(Exception ex);
     public delegate void SocketErrorDelegate(int id);
 
     public partial class Client : Form
     {
         Socket client;
-        private ManualResetEvent mreFile;
+ 
         ManualResetEvent mreMessage;
-        ManualResetEvent mreSend;
+
         UserInformation SelfInfo;
         UserInformation ServerInfo;
         IPAddress ServerIP;
@@ -40,19 +41,17 @@ namespace task4Client
         Thread threadMessageProcess;
         ClientMessageProcess MsgProcess;
         Queue<Message> msgQueue;
-        Dictionary<int, UserInformation> friends;
+        Dictionary<uint, string> friends;
 
         public Client()
         {
             InitializeComponent();
             this.FormClosed += Client_FormClosed;
-            mreFile = new ManualResetEvent(false);
             textBoxIP.Text = IPAddress.Loopback.ToString();
             msgQueue = new Queue<Message>();
             mreMessage = new ManualResetEvent(false);
-            mreSend = new ManualResetEvent(false);
 
-            friends = new Dictionary<int, UserInformation>();
+            friends = new Dictionary<uint, string>();
 
             SelfInfo = new UserInformation();
             ServerInfo = new UserInformation(UserInformation.ServerID);
@@ -67,8 +66,9 @@ namespace task4Client
             listViewChat.Columns.Add("用户", listViewChat.Width / 3);
             listViewChat.Columns.Add("内容", listViewChat.Width);
 
+             listViewOnline.Columns.Add("ID", listViewOnline.Width / 3);
             listViewOnline.Columns.Add("用户", listViewOnline.Width * 2 / 3);
-            listViewOnline.Columns.Add("ID", listViewOnline.Width / 3);
+           
         }
 
         void Client_FormClosed(object sender, FormClosedEventArgs e)
@@ -108,7 +108,7 @@ namespace task4Client
         }
         private void OnFileInfoReceived(Message msg)
         {
-            new Thread(delegate() { new FileReceiverForm(msg).ShowDialog(); }).Start();
+            new Thread(delegate () { new FileReceiverForm(msg).ShowDialog(); }).Start();
         }
         #endregion
 
@@ -126,8 +126,23 @@ namespace task4Client
         void OnMessageReceived(Message msg)
         {
             ListViewItem item = new ListViewItem();
-            item.Text = msg.Sender.Name;
-            item.SubItems.Add(msg.Content.ToString());
+            if(msg.SenderID==UserInformation.ServerID)
+            {
+                item.Text = "服务器:" + ServerInfo.Name;
+            }
+            else if(msg.SenderID==UserInformation.GroupID)
+            {
+                item.Text = "群发";
+            }
+            else if(msg.SenderID==SelfInfo.ID)
+            {
+                item.Text = "我";
+            }
+            else
+            {
+                item.Text = friends[msg.SenderID];
+            } 
+            item.SubItems.Add(msg.Text);
             listViewChat.Items.Add(item);
         }
         #endregion
@@ -145,19 +160,38 @@ namespace task4Client
 
         private void OnOnlineNotifyReceived(Message msg)
         {
-            foreach (var friend in msg.Friends)
+            if (msg.SenderID == this.SelfInfo.ID)
+                return;
+            if (!this.friends.ContainsKey(msg.SenderID))
             {
                 lock (this.friends)
                 {
-                    if (!this.friends.ContainsKey(friend.Key))
-                        this.friends.Add(friend.Key, friend.Value);
+                    this.friends.Add(msg.SenderID, msg.SenderName);
                 }
                 ListViewItem item = new ListViewItem();
-                item.Text = friend.Value.Name;
-                item.SubItems.Add(friend.Value.ID.ToString());
+                item.Text = msg.SenderID.ToString();
+                item.SubItems.Add(msg.SenderName);
                 listViewOnline.Items.Add(item);
             }
-
+        }
+        private void FirstOnlineNotifyReceived(Message msg)
+        {
+            foreach (var friend in msg.OnlineInfo)
+            {
+                if (friend.Key == this.SelfInfo.ID)
+                    continue;
+                if (!this.friends.ContainsKey(friend.Key))
+                {
+                    lock (this.friends)
+                    {
+                        this.friends.Add(friend.Key, friend.Value);
+                    }
+                    ListViewItem item = new ListViewItem();
+                    item.Text = friend.Key.ToString();
+                    item.SubItems.Add(friend.Value);
+                    listViewOnline.Items.Add(item);
+                }
+            }
         }
         #endregion
 
@@ -174,7 +208,11 @@ namespace task4Client
         }
         private void OnOfflineNotifyReceived(Message msg)
         {
-            string strID = msg.Friend.ID.ToString();
+            string strID = msg.OfflineID.ToString();
+            if (friends.ContainsKey(msg.OfflineID))
+            {
+                friends.Remove(msg.OfflineID);
+            }
             foreach (ListViewItem item in listViewOnline.Items)
             {
                 if (item.SubItems[1].Text == strID)
@@ -183,6 +221,7 @@ namespace task4Client
                     return;
                 }
             }
+
         }
         #endregion
 
@@ -251,8 +290,8 @@ namespace task4Client
             try
             {
                 client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                client.SendBufferSize = Message.MaxMessageSize;
-                client.ReceiveBufferSize = Message.MaxMessageSize;
+                client.SendBufferSize = MessageConvert.MaxMessageSize;
+                client.ReceiveBufferSize = MessageConvert.MaxMessageSize;
                 client.BeginConnect(hostEndPoint, new AsyncCallback(OnConnected), client);
             }
             catch (Exception e)
@@ -282,58 +321,60 @@ namespace task4Client
 
 
             byte[] data = null;
+            byte[] onlines = null;
+            Message msg;
             try
             {
                 client.EndConnect(ar);
-                data = Message.GetMessageBytes(SelfInfo, ServerInfo, "你好，我是 " + SelfInfo.Name);
+                msg = new Message(this.SelfInfo.Name);
+                data = MessageConvert.GetBytes(msg);
                 client.Send(data, 0, data.Length, SocketFlags.None);
-                data = new byte[Message.MaxMessageSize];
-                client.Receive(data, 0, data.Length, SocketFlags.None);
+                data = new byte[MessageConvert.MaxMessageSize];
+                client.Receive(data);
+                onlines = new byte[MessageConvert.MaxMessageSize];
+                client.Receive(onlines);
             }
             catch (Exception e)
             {
                 ExceptionOccurred(e);
                 return;
             }
-            Message msg = new Message();
+            msg = new Message();
             try
             {
-                msg.ParseXmlString(data);
+                msg = MessageConvert.RestoreBytes(data);
+                this.BeginInvoke(new OnlineOfflineDelegate(FirstOnlineNotifyReceived), MessageConvert.RestoreBytes(onlines));
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 ExceptionOccurred(ex);
                 return;
             }
-            lock (msgQueue)
-            {
-                msgQueue.Enqueue(msg);
-                mreMessage.Set();
-            }
-            this.SelfInfo.ID = msg.Receiver.ID;
+            this.SelfInfo.ID = msg.ReceiverID;
+            this.ServerInfo.Name = msg.SenderName;
 
             while (true)
             {
-                data = new byte[Message.MaxMessageSize];
+                data = new byte[MessageConvert.MaxMessageSize];
                 try
                 {
                     client.Receive(data, 0, data.Length, SocketFlags.None);
                     msg = new Message();
-                    msg.ParseXmlString(data);
+                    msg = MessageConvert.RestoreBytes(data);
                 }
-                catch(Exception ex)
+                catch (Exception ex)
                 {
                     ExceptionOccurred(ex);
                     return;
                 }
-                
+
                 lock (msgQueue)
                 {
                     msgQueue.Enqueue(msg);
                     mreMessage.Set();
                 }
             }
-        } 
+        }
         public void UpdateControls(bool OnConnect)
         {
             textBoxIP.Enabled = !OnConnect;
@@ -365,16 +406,17 @@ namespace task4Client
             }
             if (radioButtonGroup.Checked)
             {
-                byte[] data = Message.GetMessageBytes(SelfInfo, new UserInformation(UserInformation.GroupID), textBoxMessage.Text);
+                byte[] data = MessageConvert.GetMessageBytes(SelfInfo.ID, UserInformation.GroupID, textBoxMessage.Text);
                 ThreadPool.QueueUserWorkItem(new WaitCallback(SendMessage), data);
             }
             else if (radioButtonSingle.Checked)
             {
-                int id;
+                uint id;
                 try
                 {
-                    Int32.TryParse(listViewOnline.FocusedItem.SubItems[1].Text, out id);
-                    byte[] data = Message.GetMessageBytes(SelfInfo, friends[id], textBoxMessage.Text);
+
+                    UInt32.TryParse(listViewOnline.FocusedItem.SubItems[0].Text, out id);
+                    byte[] data = MessageConvert.GetMessageBytes(SelfInfo.ID, id, textBoxMessage.Text);
                     ThreadPool.QueueUserWorkItem(new WaitCallback(SendMessage), data);
                 }
                 catch (Exception)
@@ -384,7 +426,7 @@ namespace task4Client
             }
             else
             {
-                byte[] data = Message.GetMessageBytes(SelfInfo, new UserInformation(UserInformation.ServerID), textBoxMessage.Text);
+                byte[] data = MessageConvert.GetMessageBytes(SelfInfo.ID, UserInformation.ServerID, textBoxMessage.Text);
                 ThreadPool.QueueUserWorkItem(new WaitCallback(SendMessage), data);
             }
 
@@ -416,18 +458,16 @@ namespace task4Client
                 return;
             }
 
-            UserInformation receiver = null;
+            uint id = 0;
             if (radioButtonGroup.Checked)
             {
-                receiver = new UserInformation(UserInformation.GroupID);
+                id = UserInformation.GroupID;
             }
             else if (radioButtonSingle.Checked)
             {
-                int id;
                 try
                 {
-                    Int32.TryParse(listViewOnline.FocusedItem.SubItems[1].Text, out id);
-                    receiver = friends[id];
+                    UInt32.TryParse(listViewOnline.FocusedItem.SubItems[1].Text, out id);
                 }
                 catch (Exception)
                 {
@@ -436,12 +476,12 @@ namespace task4Client
             }
             else
             {
-                receiver = new UserInformation(UserInformation.ServerID);
+                id = UserInformation.ServerID;
             }
             Thread thread = new Thread(this.SendFile);
-            thread.Start(receiver);
+            thread.Start(id);
         }
-        public void SendFile(object receiver)
+        public void SendFile(object id)
         {
 
             Socket fileSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -452,10 +492,10 @@ namespace task4Client
             sender.ID = SelfInfo.ID;
             sender.IP = ((IPEndPoint)fileSocket.LocalEndPoint).Address.ToString();
             sender.Port = ((IPEndPoint)fileSocket.LocalEndPoint).Port;
-            byte[] data = Message.GetFileBytes(sender, (UserInformation)receiver, new FileInformation(openFileDialog.FileName));
+            byte[] data = MessageConvert.GetFileInfoBytes(sender, (uint)id, openFileDialog.FileName);
             ThreadPool.QueueUserWorkItem(new WaitCallback(SendMessage), data);
 
-            new Thread(delegate() { new FileSenderForm(fileSocket, openFileDialog.FileName).ShowDialog(); }).Start();
+            new Thread(delegate () { new FileSenderForm(fileSocket, openFileDialog.FileName).ShowDialog(); }).Start();
         }
         private void Client_Load(object sender, EventArgs e)
         {

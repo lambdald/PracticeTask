@@ -135,7 +135,6 @@
             this.textBoxServerName.TabIndex = 4;
             this.textBoxServerName.Text = "Server";
             this.textBoxServerName.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
-            this.textBoxServerName.TextChanged += new System.EventHandler(this.textBoxServerName_TextChanged);
             // 
             // labelServerName
             // 

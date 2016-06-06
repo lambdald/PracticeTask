@@ -1315,7 +1315,7 @@ namespace task4Lib
             this.Socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             try
             {
-                this.Socket.Connect(Msg.Sender.IP, Msg.Sender.Port);
+                this.Socket.Connect(Msg.SenderIP, Msg.SenderPort);
             }
             catch (SocketException)
             {
