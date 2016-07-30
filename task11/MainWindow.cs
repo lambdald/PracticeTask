@@ -212,6 +212,7 @@ namespace task1
             gdi.DrawImage(bitmap, 0, 0);
 
             Pen pen = new Pen(Color.White);
+            gdi.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             gdi.DrawLine(pen, pntArrRelativeSign[0], pntArrRelativeSign[1]);
             gdi.DrawLine(pen, pntArrRelativeSign[2], pntArrRelativeSign[3]);
             gdi.DrawLine(pen, pntArrRelativeSign[0], pntArrRelativeSign[2]);
@@ -219,6 +220,7 @@ namespace task1
 
             //绘制十字
             pen.Color = Color.Red;
+            
             for (int i = 0; i < 4; i++)
             {
                 gdi.DrawLine(pen, pntArrRelativeSign[i].X - iSizeOfSign / 2, pntArrRelativeSign[i].Y

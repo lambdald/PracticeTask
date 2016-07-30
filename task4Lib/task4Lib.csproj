@@ -9,8 +9,9 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>task4Lib</RootNamespace>
     <AssemblyName>task4Lib</AssemblyName>
-    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.5.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
+    <TargetFrameworkProfile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -47,7 +48,7 @@
     <Compile Include="FileSenderForm.Designer.cs">
       <DependentUpon>FileSenderForm.cs</DependentUpon>
     </Compile>
-    <Compile Include="FileTransmissionSolution.cs" />
+    <Compile Include="FileTransmission.cs" />
     <Compile Include="FileReceiverForm.cs">
       <SubType>Form</SubType>
     </Compile>

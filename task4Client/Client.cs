@@ -14,11 +14,12 @@ using System.Windows.Forms;
 using System.Xml;
 using task4Lib;
 using System.Diagnostics;
-using Message = task4Lib.Message;
+
 namespace task4Client
 {
-    public delegate void SimpleDelegate();
+    using Message = task4Lib.Message;
 
+    public delegate void SimpleDelegate();
     public delegate void UpdateControlsDelegate(bool OnConnect);
     public delegate void MessageDelegate(Message msg);
     public delegate void OnlineOfflineDelegate(Message msg);
@@ -33,23 +34,26 @@ namespace task4Client
         Socket client;
         bool IsConnected;
 
+        //用于通知消息线程
         ManualResetEvent mreMessage;
 
         UserInformation SelfInfo;
         UserInformation ServerInfo;
         IPAddress ServerIP;
         IPEndPoint hostEndPoint;
-        Thread connection;
-        Thread threadMessageProcess;
-        ClientMessageProcess MsgProcess;
+
+        Thread connection;  //保持与服务器的连接
+        Thread threadMessageProcess;    //消息处理
+        ClientMessageProcess MsgProcess;    //消息处理类
         Queue<Message> msgQueue;
-        Dictionary<uint, string> friends;
+        Dictionary<uint, string> friends;   //在线好友，保存用户id和用户名
 
         public Client()
         {
             InitializeComponent();
             this.FormClosed += Client_FormClosed;
             this.FormClosing+=Client_FormClosing;
+
             textBoxIP.Text = IPAddress.Loopback.ToString();
             msgQueue = new Queue<Message>();
             mreMessage = new ManualResetEvent(false);
@@ -69,14 +73,14 @@ namespace task4Client
             listViewChat.Columns.Add("用户", listViewChat.Width / 3);
             listViewChat.Columns.Add("内容", listViewChat.Width);
 
-             listViewOnline.Columns.Add("ID", listViewOnline.Width / 3);
+            listViewOnline.Columns.Add("ID", listViewOnline.Width / 3);
             listViewOnline.Columns.Add("用户", listViewOnline.Width * 2 / 3);
            
         }
 
         private void Client_FormClosing(object sender, FormClosingEventArgs e)
         {
-            this.Clean();
+            this.StopConnect();
         }
 
         void Client_FormClosed(object sender, FormClosedEventArgs e)
@@ -240,13 +244,17 @@ namespace task4Client
             else
             {
                 MessageBox.Show(ex.ToString());
-                this.Clean();
+                this.StopConnect();
             }
         }
-
         private void UpdateStatus(string str)
         {
-            status.Text = str;
+            if (InvokeRequired)
+                this.BeginInvoke(new StatusDelegate(this.UpdateStatus), str);
+            else
+            {
+                status.Text = str;
+            }
         }
         private void btnConnectServer_Click(object sender, EventArgs e)
         {
@@ -307,7 +315,6 @@ namespace task4Client
             {
 
             }
-
         }
 
         public void ConnectFailed(Exception e)
@@ -346,7 +353,7 @@ namespace task4Client
                 {
                     this.ConnectFailed(e);
                 }
-                this.BeginInvoke(new SimpleDelegate(this.Clean));
+                this.BeginInvoke(new SimpleDelegate(this.StopConnect));
                 return;
             }
             msg = new Message();
@@ -394,7 +401,7 @@ namespace task4Client
                 int size = sp.currentSocket.EndReceive(ar);
                 if (size == 0)
                 {
-                    this.BeginInvoke(new SimpleDelegate(this.Clean));
+                    this.BeginInvoke(new SimpleDelegate(this.StopConnect));
                     return;
                 }
                 byte[] data = new byte[size];
@@ -477,7 +484,7 @@ namespace task4Client
         }
         private void btnCloseConnection_Click(object sender, EventArgs e)
         {
-            this.Clean();
+            this.StopConnect();
         }
 
         private void btnSendFile_Click(object sender, EventArgs e)
@@ -535,12 +542,21 @@ namespace task4Client
         {
             UpdateControls(false);
         }
+
+        /// <summary>
+        /// 清空聊天内容
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void btnClear_Click(object sender, EventArgs e)
         {
             listViewChat.Items.Clear();
         }
 
-        public void Clean()
+        /// <summary>
+        /// 关闭连接
+        /// </summary>
+        public void StopConnect()
         {
             IsConnected = false;
             UpdateControls(false);

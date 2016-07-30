@@ -40,11 +40,6 @@ namespace task21
 
         }
 
-        public void UpdateTime(object sender, System.Timers.ElapsedEventArgs e)
-        {
-
-        }
-
         private void btnFontDialog_Click(object sender, EventArgs e)
         {
             if (fontDialog.ShowDialog() == DialogResult.OK)
@@ -63,8 +58,10 @@ namespace task21
             {
                 g.DrawImage(bitmap, 0, 0);
             }
-            pen.Color = Color.Red;
             g.DrawString(datetime.ToString("yyyy年MM月dd日  dddd HH:mm:ss"), font, drawBrush, 0, 0);
+
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            pen.Color = Color.Red;
             pen.Width = 8;
             g.DrawEllipse(pen, pntClock.X - iRadiusOfClock, pntClock.Y - iRadiusOfClock, iRadiusOfClock * 2, iRadiusOfClock * 2);
             
@@ -139,6 +136,7 @@ namespace task21
         private void btnDefaultFont_Click(object sender, EventArgs e)
         {
             font = new Font(new FontFamily("宋体"), 15);
+            drawBrush = new SolidBrush(Color.Black);
             this.picBoxDatetime.Invalidate();            
         }
 

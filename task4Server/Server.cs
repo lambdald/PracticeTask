@@ -85,6 +85,7 @@ namespace task4Server
 
         void Server_FormClosed(object sender, FormClosedEventArgs e)
         {
+            this.CloseServer();
             Process.GetCurrentProcess().Kill();
         }
         public void UpdateControls(bool OnServe)
@@ -575,8 +576,8 @@ namespace task4Server
                     return;
                 }
 
-                int id;
-                Int32.TryParse(listViewClient.FocusedItem.SubItems[1].Text, out id);
+                uint id;
+                UInt32.TryParse(listViewClient.FocusedItem.SubItems[1].Text, out id);
                 Thread th = new Thread(SendFile);
                 th.Start(id);
                 this.status.Text = "等待发送文件";
